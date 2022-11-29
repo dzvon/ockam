@@ -48,24 +48,9 @@ impl Vault {
                 ))
                 .await?
             }
-            SecretType::NistP256 => '_block: {
-                #[cfg(feature = "aws")]
-                if attributes.persistence() == SecretPersistence::Persistent {
-                    if let Some(kms) = &self.aws_kms {
-                        if let Secret::Aws(kid) = secret {
-                            let pk = kms.public_key(kid).await?;
-                            break '_block self.compute_key_id_for_public_key(&pk).await?;
-                        }
-                    }
-                }
-                cfg_if! {
-                    if #[cfg(any(feature = "evercrypt", feature = "rustcrypto"))] {
-                        let pk = public_key(secret.try_as_key()?.as_ref())?;
-                        self.compute_key_id_for_public_key(&pk).await?
-                    } else {
-                        return Err(VaultError::InvalidKeyType.into())
-                    }
-                }
+            SecretType::NistP256 => {
+                self.compute_key_id_from_nistp256(secret, attributes)
+                    .await?
             }
             SecretType::Buffer | SecretType::Aes => {
                 // NOTE: Buffer and Aes secrets in the system are ephemeral and it should be fine,
@@ -96,6 +81,52 @@ impl Vault {
         }
 
         Ok(())
+    }
+
+    async fn compute_key_id_from_nistp256(
+        &self,
+        secret: &Secret,
+        _attributes: &SecretAttributes,
+    ) -> Result<KeyId> {
+        #[cfg(feature = "aws")]
+        if _attributes.persistence() == SecretPersistence::Persistent {
+            if let Some(kms) = &self.aws_kms {
+                if let Secret::Aws(kid) = secret {
+                    let pk = kms.public_key(kid).await?;
+                    return self.compute_key_id_for_public_key(&pk).await;
+                }
+            }
+        }
+        cfg_if! {
+            if #[cfg(any(feature = "evercrypt", feature = "rustcrypto"))] {
+                let pk = public_key(secret.try_as_key()?.as_ref())?;
+                self.compute_key_id_for_public_key(&pk).await
+            } else {
+                Err(VaultError::InvalidKeyType.into())
+            }
+        }
+    }
+
+    async fn secret_generate_nistp256(&self, _attributes: SecretAttributes) -> Result<Secret> {
+        #[cfg(feature = "aws")]
+        if _attributes.persistence() == SecretPersistence::Persistent {
+            if let Some(kms) = &self.aws_kms {
+                let aws_id = kms.create_key().await?;
+                return Ok(Secret::Aws(aws_id));
+            }
+        }
+        cfg_if! {
+            if #[cfg(any(feature = "evercrypt", feature = "rustcrypto"))] {
+                use p256::ecdsa::SigningKey;
+                use p256::pkcs8::EncodePrivateKey;
+                let sec = SigningKey::random(thread_rng());
+                let sec = p256::SecretKey::from_be_bytes(&sec.to_bytes()).map_err(from_ecurve)?;
+                let doc = sec.to_pkcs8_der().map_err(from_pkcs8)?;
+                Ok(Secret::Key(SecretKey::new(doc.as_bytes().to_vec())))
+            } else {
+                compile_error!("one of features {evercrypt,rustcrypto} must be given")
+            }
+        }
     }
 }
 
@@ -145,27 +176,7 @@ impl SecretVault for Vault {
 
                 Secret::Key(SecretKey::new(key))
             }
-            SecretType::NistP256 => '_block: {
-                #[cfg(feature = "aws")]
-                if attributes.persistence() == SecretPersistence::Persistent {
-                    if let Some(kms) = &self.aws_kms {
-                        let aws_id = kms.create_key().await?;
-                        break '_block Secret::Aws(aws_id);
-                    }
-                }
-                cfg_if! {
-                    if #[cfg(any(feature = "evercrypt", feature = "rustcrypto"))] {
-                        use p256::ecdsa::SigningKey;
-                        use p256::pkcs8::EncodePrivateKey;
-                        let sec = SigningKey::random(thread_rng());
-                        let sec = p256::SecretKey::from_be_bytes(&sec.to_bytes()).map_err(from_ecurve)?;
-                        let doc = sec.to_pkcs8_der().map_err(from_pkcs8)?;
-                        Secret::Key(SecretKey::new(doc.as_bytes().to_vec()))
-                    } else {
-                        compile_error!("one of features {evercrypt,rustcrypto} must be given")
-                    }
-                }
-            }
+            SecretType::NistP256 => self.secret_generate_nistp256(attributes).await?,
         };
         let key_id = self.compute_key_id(&secret, &attributes).await?;
 

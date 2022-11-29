@@ -26,7 +26,7 @@ impl<'a> CreateVaultRequest<'a> {
     }
 
     pub fn with_aws_kms(mut self, val: bool) -> Self {
-        self.with_aws = val.then_some(true);
+        self.with_aws = if val { Some(val) } else { None };
         self
     }
 

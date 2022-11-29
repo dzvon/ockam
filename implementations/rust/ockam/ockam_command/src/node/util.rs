@@ -113,7 +113,7 @@ pub(super) async fn create_default_identity_if_needed(
             let attrs =
                 SecretAttributes::new(SecretType::NistP256, SecretPersistence::Persistent, 32);
             let kid = vault
-                .secret_import(Secret::Aws(kid.to_string()), attrs.clone())
+                .secret_import(Secret::Aws(kid.to_string()), attrs)
                 .await?;
             let attrs = KeyAttributes::new(IdentityStateConst::ROOT_LABEL.to_string(), attrs);
             Identity::create_ext(ctx, &vault, &kid, attrs).await?
