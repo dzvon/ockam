@@ -7,7 +7,8 @@ defmodule Ockam.Vault.Software.MixProject do
 
   @ockam_release_url "https://github.com/build-trust/ockam/releases"
   @download_libs [
-    {"ockam.linux_elixir_ffi.so", ["linux_x86_64_gnu", "native", "libockam_elixir_ffi.so"]},
+    {"ockam.linux_x86_64_gnu_elixir_ffi.so", ["linux_x86_64_gnu", "native", "libockam_elixir_ffi.so"]},
+    {"ockam.linux_aarch64_gnu_elixir_ffi.so", ["linux_aarch64_gnu", "native", "libockam_elixir_ffi.so"]},
     {"ockam.darwin_universal_elixir_ffi.so",
      ["darwin_universal", "native", "libockam_elixir_ffi.so"]}
   ]
@@ -149,7 +150,7 @@ defmodule Ockam.Vault.Software.MixProject do
       IO.puts("Downloading lib from #{download_url} to #{dest_file}")
       File.rm_rf(dest_file)
 
-      {:ok, :saved_to_file} =
+      download_result =
         :httpc.request(
           :get,
           {to_charlist(download_url), []},
@@ -158,6 +159,11 @@ defmodule Ockam.Vault.Software.MixProject do
           [{:ssl, [{:versions, [:"tlsv1.2"]}]}],
           stream: to_charlist(dest_file)
         )
+      case download_result do
+        {:ok, :saved_to_file} -> IO.puts("Download OK")
+        {:ok, other} -> IO.puts("Download error: #{inspect(other)}")
+        other -> IO.puts("Download error: #{inspect(other)}")
+      end
     end)
   end
 
